@@ -38,6 +38,10 @@ def h(text):
 from style import inject_css
 inject_css()
 
+if not st.session_state.get('user_id'):
+    st.warning("Please login from the main page first.")
+    st.stop()
+
 
 st.markdown("<div class='section-header'>🗺️ Route Planning & Carbon Offsets</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Compare transit modes, track your footprint, and build a simulated offset portfolio. Note: This is a simulation and does not process real financial transactions.</div>", unsafe_allow_html=True)
@@ -103,8 +107,7 @@ with offset_col:
             is_valid, msg = validate_offset_transaction(tonnes, selected_proj["available_capacity"])
             if is_valid:
                 cost = calculate_offset_cost(tonnes, selected_proj["cost_per_tonne"])
-                # Defaulting to user_id=1 for now as per instructions
-                if save_offset_transaction(1, selected_proj["id"], selected_proj["name"], tonnes, selected_proj["cost_per_tonne"], cost):
+                if save_offset_transaction(st.session_state.user_id, selected_proj["id"], selected_proj["name"], tonnes, selected_proj["cost_per_tonne"], cost):
                     st.success(f"Simulated purchase successful! Offset {tonnes}t for ${cost:.2f}.")
                 else:
                     st.error("Failed to save transaction.")
@@ -118,8 +121,8 @@ port_col1, port_col2 = st.columns([1, 2])
 
 with port_col1:
     st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-    total_offsets = get_total_offsets(1)
-    total_spend = get_total_spend(1)
+    total_offsets = get_total_offsets(st.session_state.user_id)
+    total_spend = get_total_spend(st.session_state.user_id)
     st.metric("Total Tonnes Offset", f"{total_offsets:.2f}t")
     st.metric("Total Simulated Spend", f"${total_spend:.2f}")
     
@@ -131,7 +134,7 @@ with port_col1:
 
 with port_col2:
     st.subheader("Transaction History")
-    transactions = get_offset_transactions(1)
+    transactions = get_offset_transactions(st.session_state.user_id)
     if transactions:
         df_trans = pd.DataFrame(transactions)
         st.dataframe(df_trans[['created_at', 'project_name', 'offset_tonnes', 'total_cost', 'transaction_status']])

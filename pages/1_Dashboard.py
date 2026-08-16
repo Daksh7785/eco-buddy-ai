@@ -38,6 +38,10 @@ def h(text):
 from style import inject_css
 inject_css()
 
+if not st.session_state.get('user_id'):
+    st.warning("Please login from the main page first.")
+    st.stop()
+
 
 st.markdown("<div class='section-header'>📝 Your Lifestyle Profile</div>", unsafe_allow_html=True)
 
@@ -185,7 +189,7 @@ if analyze_btn:
     )
 
     save_assessment(
-        transport, distance, electricity, diet, flights, total, eco_score
+        st.session_state.user_id, transport, distance, electricity, diet, flights, total, eco_score
     )
 
     st.success("✅ Analysis completed!")
@@ -461,7 +465,7 @@ st.markdown("---")
 
 st.markdown("<div class='section-header'>📈 Your Eco Journey</div>", unsafe_allow_html=True)
 
-history = get_assessments()
+history = get_assessments(st.session_state.user_id)
 
 if history:
 

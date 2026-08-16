@@ -1,7 +1,7 @@
 import sqlite3
+import bcrypt
 
 DB_NAME = "eco_buddy.db"
-
 
 def init_db():
     try:
@@ -9,8 +9,18 @@ def init_db():
         cursor = conn.cursor()
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS assessments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
                 date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 transport TEXT,
                 distance REAL,
@@ -29,8 +39,51 @@ def init_db():
         print(f"Database init error: {e}")
         return False
 
+def create_user(username, email, password):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Hash password
+        salt = bcrypt.gensalt()
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+        
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash)
+            VALUES (?, ?, ?)
+        """, (username, email, password_hash))
+        
+        conn.commit()
+        user_id = cursor.lastrowid
+        conn.close()
+        return user_id
+    except sqlite3.IntegrityError:
+        # Username or email already exists
+        return None
+    except Exception as e:
+        print(f"create_user error: {e}")
+        return None
+
+def verify_user(username, password):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            user_id, stored_hash = result
+            if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                return user_id
+        return None
+    except Exception as e:
+        print(f"verify_user error: {e}")
+        return None
 
 def save_assessment(
+    user_id,
     transport,
     distance,
     electricity,
@@ -45,6 +98,7 @@ def save_assessment(
 
         cursor.execute("""
             INSERT INTO assessments (
+                user_id,
                 transport,
                 distance,
                 electricity,
@@ -53,8 +107,9 @@ def save_assessment(
                 footprint,
                 eco_score
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            user_id,
             transport,
             distance,
             electricity,
@@ -71,8 +126,7 @@ def save_assessment(
         print(f"Database save error: {e}")
         return False
 
-
-def get_assessments():
+def get_assessments(user_id):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -80,11 +134,11 @@ def get_assessments():
         cursor.execute("""
             SELECT *
             FROM assessments
+            WHERE user_id = ?
             ORDER BY date DESC
-        """)
+        """, (user_id,))
 
         data = cursor.fetchall()
-
         conn.close()
         return data
     except sqlite3.Error as e:
@@ -99,7 +153,7 @@ def init_energy_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS appliances (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 name TEXT,
                 category TEXT,
                 quantity INTEGER,
@@ -115,7 +169,7 @@ def init_energy_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS solar_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 roof_space_m2 REAL,
                 peak_sun_hours REAL,
                 utility_rate_per_kwh REAL,
@@ -135,14 +189,14 @@ def init_energy_db():
         print(f"Database energy init error: {e}")
         return False
 
-def add_appliance(name, category, quantity, power_rating, hours_used, standby_draw):
+def add_appliance(user_id, name, category, quantity, power_rating, hours_used, standby_draw):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO appliances (user_id, name, category, quantity, power_rating_watts, hours_used_per_day, standby_draw_watts)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
-        """, (name, category, quantity, power_rating, hours_used, standby_draw))
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, name, category, quantity, power_rating, hours_used, standby_draw))
         conn.commit()
         conn.close()
         return True
@@ -161,11 +215,11 @@ def delete_appliance(app_id):
     except sqlite3.Error as e:
         return False
 
-def get_appliances():
+def get_appliances(user_id):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM appliances ORDER BY created_at DESC")
+        cursor.execute("SELECT * FROM appliances WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
         columns = [column[0] for column in cursor.description]
         data = cursor.fetchall()
         conn.close()
@@ -173,30 +227,30 @@ def get_appliances():
     except sqlite3.Error as e:
         return []
 
-def save_solar_config(roof_space, peak_sun_hours, utility_rate, panel_efficiency, install_cost, maint_cost, rate_inc):
+def save_solar_config(user_id, roof_space, peak_sun_hours, utility_rate, panel_efficiency, install_cost, maint_cost, rate_inc):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         
-        cursor.execute("DELETE FROM solar_configs WHERE user_id = 1")
+        cursor.execute("DELETE FROM solar_configs WHERE user_id = ?", (user_id,))
         
         cursor.execute("""
             INSERT INTO solar_configs (
-                roof_space_m2, peak_sun_hours, utility_rate_per_kwh, panel_efficiency, 
+                user_id, roof_space_m2, peak_sun_hours, utility_rate_per_kwh, panel_efficiency, 
                 installation_cost_per_kw, maintenance_cost_per_year, annual_rate_increase
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (roof_space, peak_sun_hours, utility_rate, panel_efficiency, install_cost, maint_cost, rate_inc))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, roof_space, peak_sun_hours, utility_rate, panel_efficiency, install_cost, maint_cost, rate_inc))
         conn.commit()
         conn.close()
         return True
     except sqlite3.Error as e:
         return False
 
-def get_solar_config():
+def get_solar_config(user_id):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM solar_configs WHERE user_id = 1 LIMIT 1")
+        cursor.execute("SELECT * FROM solar_configs WHERE user_id = ? LIMIT 1", (user_id,))
         columns = [column[0] for column in cursor.description]
         row = cursor.fetchone()
         conn.close()
@@ -215,7 +269,7 @@ def init_gamification_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_challenges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 challenge_id TEXT NOT NULL,
                 progress_value REAL DEFAULT 0.0,
                 status TEXT DEFAULT 'enrolled',
@@ -230,7 +284,7 @@ def init_gamification_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS unlocked_badges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 badge_id TEXT NOT NULL,
                 unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 xp_awarded BOOLEAN DEFAULT 0,
@@ -242,7 +296,7 @@ def init_gamification_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS xp_transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 source_type TEXT NOT NULL,
                 source_id TEXT NOT NULL,
                 xp_amount INTEGER NOT NULL,
@@ -437,7 +491,7 @@ def init_marketplace_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS journey_profiles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
                 distance_km REAL NOT NULL,
                 transport_mode TEXT NOT NULL,
@@ -452,7 +506,7 @@ def init_marketplace_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS offset_transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 project_id TEXT NOT NULL,
                 project_name TEXT NOT NULL,
                 offset_tonnes REAL NOT NULL,
@@ -617,7 +671,7 @@ def init_water_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS water_consumption (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
+                user_id INTEGER NOT NULL,
                 shower_mins_per_day REAL,
                 laundry_loads_per_week REAL,
                 dishwasher_runs_per_week REAL,

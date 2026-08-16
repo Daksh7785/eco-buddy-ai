@@ -38,6 +38,10 @@ def h(text):
 from style import inject_css
 inject_css()
 
+if not st.session_state.get('user_id'):
+    st.warning("Please login from the main page first.")
+    st.stop()
+
 
 import database as db
 import energy_audit as ea
@@ -63,11 +67,11 @@ with st.expander("➕ Add New Appliance", expanded=False):
 
         submit_app = st.form_submit_button("Add Appliance")
         if submit_app and app_name:
-            db.add_appliance(app_name, app_cat, app_qty, app_power, app_hours, app_standby)
+            db.add_appliance(st.session_state.user_id, app_name, app_cat, app_qty, app_power, app_hours, app_standby)
             st.success(f"Added {app_name}")
             st.rerun()
 
-appliances = db.get_appliances()
+appliances = db.get_appliances(st.session_state.user_id)
 if appliances:
     # Build a styled HTML table instead of st.dataframe
     category_icons = {"AC": "❄️", "EV Charger": "🔋", "Heat Pump": "🌡️", "Refrigerator": "🧊", "Lighting": "💡", "Other": "🔌"}

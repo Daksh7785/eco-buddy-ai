@@ -4,6 +4,10 @@ from style import inject_css
 
 inject_css()
 
+if not st.session_state.get('user_id'):
+    st.warning("Please login from the main page first.")
+    st.stop()
+
 st.markdown("<div class='section-header'>⚙️ Settings</div>", unsafe_allow_html=True)
 
 st.markdown("### 🌍 Regional Preferences")

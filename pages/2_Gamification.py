@@ -1,22 +1,43 @@
+import html
+import time
 import streamlit as st
 import pandas as pd
-import time
-from database import *
-from emissions import *
-from recommendations import *
-from ocr_utils import *
-import os
-import tempfile
-import uuid
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
-from report import generate_pdf
-import gamification as gf
-from marketplace import *
-import energy_audit as ea
+import tempfile
+import uuid
+import os
+from dotenv import load_dotenv
 
-from styles.theme import apply_theme
-apply_theme()
+load_dotenv()
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+
+from database import init_db, save_assessment, get_assessments, init_gamification_db
+import gamification as gf
+from emissions import calculate_footprint, calculate_eco_score
+from llm_parser import parse_quick_log
+from recommendations import generate_recommendations
+from ocr_utils import extract_text_from_file, parse_energy_consumption
+
+from database import (
+    init_marketplace_db, save_journey_profile, get_journey_profiles, delete_journey_profile,
+    save_offset_transaction, get_offset_transactions, delete_offset_transaction,
+    get_total_offsets, get_total_spend
+)
+from marketplace import (
+    calculate_trip_emissions, calculate_recurring_trip_emissions, compare_transit_modes,
+    calculate_offset_cost, validate_offset_transaction, get_offset_projects,
+    calculate_net_emissions, calculate_net_zero_progress, get_project_by_id, EMISSION_FACTORS
+)
+
+def h(text):
+    return html.escape(str(text))
+
+from style import inject_css
+inject_css()
+
 
 st.markdown("<div class='section-header'>🎮 Your Eco Journey</div>", unsafe_allow_html=True)
 
@@ -80,5 +101,4 @@ for i, (b_id, b_data) in enumerate(gf.BADGES.items()):
         else:
             st.markdown(f"**🔒 {b_data['name']}**")
             st.caption(b_data['desc'])
-
 

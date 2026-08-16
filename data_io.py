@@ -1,34 +1,20 @@
-import sqlite3
 import json
 import csv
 import io
 import zipfile
-from database import DB_NAME
-
-def _dict_factory(cursor, row):
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
+import database
+from sqlalchemy import text
 
 def _get_all_table_data(table_name):
-    conn = None
     try:
-        conn = sqlite3.connect(DB_NAME)
-        conn.row_factory = _dict_factory
-        cursor = conn.cursor()
-        # Ensure table exists first to avoid errors if db is empty
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        if not cursor.fetchone():
-            return []
-        cursor.execute(f"SELECT * FROM {table_name}")
-        return cursor.fetchall()
-    except sqlite3.Error as e:
+        with database.engine.connect() as conn:
+            # SQLAlchemy text() for raw SQL queries if we really want to just dump
+            result = conn.execute(text(f"SELECT * FROM {table_name}"))
+            keys = result.keys()
+            return [dict(zip(keys, row)) for row in result]
+    except Exception as e:
         print(f"Error reading table {table_name}: {e}")
         return []
-    finally:
-        if conn:
-            conn.close()
 
 def export_data_json():
     """Exports all user data as a JSON string."""
@@ -89,57 +75,44 @@ def import_data_json(json_str, strategy='merge'):
         if not isinstance(rows, list):
             return False, f"Invalid data format for table {table}."
             
-    conn = None
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        
-        cursor.execute("BEGIN TRANSACTION")
-        
-        for table, rows in data.items():
-            if table not in expected_tables:
-                continue
-                
-            if strategy == 'replace':
-                cursor.execute(f"DELETE FROM {table}")
-                
-            for row in rows:
-                if not row:
+        with database.engine.begin() as conn:
+            for table, rows in data.items():
+                if table not in expected_tables:
                     continue
-                
-                # Check for duplicates by timestamp in merge strategy
-                if strategy == 'merge':
-                    ts_col = None
-                    if 'created_at' in row:
-                        ts_col = 'created_at'
-                    elif 'date' in row:
-                        ts_col = 'date'
-                    elif 'enrolled_at' in row:
-                        ts_col = 'enrolled_at'
-                    elif 'unlocked_at' in row:
-                        ts_col = 'unlocked_at'
-                        
-                    if ts_col:
-                        cursor.execute(f"SELECT 1 FROM {table} WHERE {ts_col} = ?", (row[ts_col],))
-                        if cursor.fetchone():
-                            continue # Skip duplicate
+                    
+                if strategy == 'replace':
+                    conn.execute(text(f"DELETE FROM {table}"))
+                    
+                for row in rows:
+                    if not row:
+                        continue
+                    
+                    if strategy == 'merge':
+                        ts_col = None
+                        if 'created_at' in row:
+                            ts_col = 'created_at'
+                        elif 'date' in row:
+                            ts_col = 'date'
+                        elif 'enrolled_at' in row:
+                            ts_col = 'enrolled_at'
+                        elif 'unlocked_at' in row:
+                            ts_col = 'unlocked_at'
                             
-                columns = ', '.join(row.keys())
-                placeholders = ', '.join(['?' for _ in row.keys()])
-                values = tuple(row.values())
-                
-                try:
-                    cursor.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
-                except sqlite3.IntegrityError:
-                    # Ignore unique constraint violations during merge
-                    continue
+                        if ts_col:
+                            result = conn.execute(text(f"SELECT 1 FROM {table} WHERE {ts_col} = :ts"), {"ts": row[ts_col]})
+                            if result.fetchone():
+                                continue # Skip duplicate
+                                
+                    columns = ', '.join(row.keys())
+                    placeholders = ', '.join([f":{k}" for k in row.keys()])
+                    
+                    try:
+                        conn.execute(text(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"), row)
+                    except Exception:
+                        # Ignore unique constraint violations during merge
+                        continue
 
-        conn.commit()
         return True, "Data imported successfully!"
     except Exception as e:
-        if conn:
-            conn.rollback()
         return False, f"Import failed: {str(e)}"
-    finally:
-        if conn:
-            conn.close()

@@ -13,10 +13,10 @@ TEST_DB = "test_eco_buddy.db"
 @pytest.fixture(autouse=True)
 def setup_teardown():
     db.DB_NAME = TEST_DB
-    db.init_gamification_db()
+    db.Base.metadata.drop_all(bind=db.engine)
+    db.Base.metadata.create_all(bind=db.engine)
     yield
-    if os.path.exists(TEST_DB):
-        os.remove(TEST_DB)
+    db.Base.metadata.drop_all(bind=db.engine)
 
 def test_xp_and_levels():
     # Initial state
